@@ -1,0 +1,18 @@
+bin/
+obj/
+publish/
+.vs/
+*.user
+*.suo
+
+# From the TS3AudioBot checkout only TSLib and libopus.dll are part of this app.
+third_party/TS3AudioBot/**
+!third_party/TS3AudioBot/TSLib/
+!third_party/TS3AudioBot/TSLib/**
+!third_party/TS3AudioBot/LICENSE
+!third_party/TS3AudioBot/LICENSE_COMPLETE
+!third_party/TS3AudioBot/TS3AudioBot/
+!third_party/TS3AudioBot/TS3AudioBot/lib/
+!third_party/TS3AudioBot/TS3AudioBot/lib/x64/
+!third_party/TS3AudioBot/TS3AudioBot/lib/x64/libopus.dll
+third_party/TS3AudioBot/TS3AudioBot/lib/x86/
