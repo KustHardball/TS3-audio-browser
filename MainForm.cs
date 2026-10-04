@@ -30,6 +30,7 @@ namespace TsBrowser
 		readonly TrackBar browserVolume;
 		readonly TrackBar soundVolume;
 		readonly Label statusLabel;
+		readonly Label phraseStatus;
 		readonly Timer statusTimer;
 		readonly FlowLayoutPanel favoritesBar;
 		readonly FlowLayoutPanel soundBar;
@@ -197,8 +198,19 @@ namespace TsBrowser
 			{
 				Dock = DockStyle.Top,
 				AutoSize = true,
-				Padding = new Padding(8, 0, 8, 8),
+				Padding = new Padding(8, 0, 8, 2),
 				Text = "Страница ещё молчит. Откройте ролик или радио, затем подключитесь к серверу. Канал должен быть с кодеком Opus Music."
+			};
+			phraseStatus = new Label
+			{
+				Dock = DockStyle.Top,
+				Height = 22,
+				AutoSize = false,
+				AutoEllipsis = true,
+				Padding = new Padding(8, 0, 8, 6),
+				Text = "Фразы выключены",
+				ForeColor = Color.DimGray,
+				AccessibleName = "Статус распознавания"
 			};
 
 			var capture = new BrowserAudioCapture(browserRing);
@@ -216,6 +228,7 @@ namespace TsBrowser
 			browser.TitleChanged += (_, e) => pageTitle = e.Title ?? "";
 
 			Controls.Add(browser);
+			Controls.Add(phraseStatus);
 			Controls.Add(statusLabel);
 			Controls.Add(top);
 
@@ -429,7 +442,7 @@ namespace TsBrowser
 				return;
 			try
 			{
-				BeginInvoke(new Action(() => SetStatus(text)));
+				BeginInvoke(new Action(RefreshPhraseStatus));
 			}
 			catch (InvalidOperationException)
 			{
@@ -799,11 +812,26 @@ namespace TsBrowser
 
 		void RefreshMeter()
 		{
+			RefreshPhraseStatus();
 			if (statusLabel.Tag is string pinned && (DateTime.UtcNow - lastStatus).TotalSeconds < 8)
 				return;
 
 			var link = session == null ? "не в сети" : "в сети, UID " + session.Uid;
 			statusLabel.Text = link + " · пакетов звука: " + browserRing.CapturedPackets + " · буфер " + outputRing.BufferedMilliseconds + " мс";
+		}
+
+		void RefreshPhraseStatus()
+		{
+			var hud = phraseListener.Hud();
+			phraseStatus.Text = hud.Line;
+			phraseStatus.ForeColor = hud.Level switch
+			{
+				1 => Color.SteelBlue,
+				2 => Color.DarkGreen,
+				3 => Color.DarkOrange,
+				4 => Color.Firebrick,
+				_ => Color.DimGray
+			};
 		}
 
 		DateTime lastStatus = DateTime.MinValue;

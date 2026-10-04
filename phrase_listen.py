@@ -66,6 +66,7 @@ def main() -> None:
 
         audio = np.frombuffer(payload, dtype=np.int16).astype(np.float32) / 32768.0
         try:
+            # Список фраз в подсказку не кладём: на шуме модель начинает сама их произносить.
             segments, _info = model.transcribe(
                 audio,
                 language="ru",
@@ -75,14 +76,20 @@ def main() -> None:
                 without_timestamps=True,
                 condition_on_previous_text=False,
                 temperature=0.0,
-                initial_prompt=prompt or None,
-                chunk_length=2,
+                initial_prompt=None,
+                chunk_length=4,
+                log_prob_threshold=-1.0,
+                no_speech_threshold=0.6,
+                compression_ratio_threshold=2.4,
             )
-            text = " ".join(segment.text for segment in segments).strip()
+            parts = list(segments)
+            text = " ".join(segment.text for segment in parts).strip()
+            logprob = parts[-1].avg_logprob if parts else -9.0
+            nospeech = parts[-1].no_speech_prob if parts else 1.0
         except Exception as ex:
             emit(f"error\t{ex}".replace("\n", " "))
             continue
-        emit(f"{client_id}\t{text}")
+        emit(f"{client_id}\t{text}\t{logprob:.3f}\t{nospeech:.3f}")
 
 
 if __name__ == "__main__":

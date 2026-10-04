@@ -21,6 +21,10 @@
     <None Remove="third_party\**" />
     <EmbeddedResource Remove="third_party\**" />
     <Content Remove="third_party\**" />
+    <Compile Remove="publish\**" />
+    <None Remove="publish\**" />
+    <EmbeddedResource Remove="publish\**" />
+    <Content Remove="publish\**" />
   </ItemGroup>
 
   <ItemGroup>
