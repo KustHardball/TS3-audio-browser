@@ -508,6 +508,52 @@ namespace TsBrowser
 			}
 		}
 
+		void HandlePrivateCommand(string text)
+		{
+			if (!TryParseSoundSlot(text, out int slot))
+				return;
+			if (IsDisposed || !IsHandleCreated)
+				return;
+
+			try
+			{
+				BeginInvoke(new Action(() => PlayPrivateSlot(slot)));
+			}
+			catch (InvalidOperationException)
+			{
+			}
+		}
+
+		void PlayPrivateSlot(int slot)
+		{
+			if (slot < 1 || slot > config.Sounds.Count)
+				return;
+
+			var clip = config.Sounds[slot - 1];
+			try
+			{
+				if (!mixer.TryPlay(clip.Path))
+					return;
+				SetStatus("Личка «" + clip.Name + "».");
+			}
+			catch (Exception ex)
+			{
+				SetStatus(ex.Message);
+			}
+		}
+
+		static bool TryParseSoundSlot(string text, out int slot)
+		{
+			slot = 0;
+			if (string.IsNullOrWhiteSpace(text))
+				return false;
+			text = text.Trim();
+			if (text.Length < 2 || text[0] != '!')
+				return false;
+			return int.TryParse(text.Substring(1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out slot)
+				&& slot >= 1;
+		}
+
 		void AssignHotkey(SoundClip clip)
 		{
 			using (var dialog = new HotkeyDialog(clip))
@@ -667,11 +713,12 @@ namespace TsBrowser
 							return;
 						BeginInvoke(new Action(() => SetStatus(message)));
 					};
+					created.PrivateCommand += HandlePrivateCommand;
 					await created.Connect(config);
 					session = created;
 					connectButton.Text = "Отключить";
 					SetStatus("В канале как «" + config.Nickname + "». UID: " + created.Uid
-						+ ". Слушайте этого клиента из обычного TeamSpeak. Если звук двоится, выключите «Слышать у себя» в настройках и приглушите этого клиента у себя.");
+						+ ". Личное сообщение !1 запускает первую нарезку. Пока саундбар играет, следующая команда пропускается.");
 				}
 				catch
 				{

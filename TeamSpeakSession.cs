@@ -23,6 +23,9 @@ namespace TsBrowser
 
 		public event Action<string> Status;
 
+		/// <summary>Текст личного сообщения от другого клиента.</summary>
+		public event Action<string> PrivateCommand;
+
 		public TeamSpeakSession(PcmRing ring)
 		{
 			this.ring = ring;
@@ -48,6 +51,16 @@ namespace TsBrowser
 				Status?.Invoke(text);
 			};
 			client.OnErrorEvent += (_, error) => Status?.Invoke(error.ErrorFormat());
+			client.OnEachTextMessage += (_, message) =>
+			{
+				if (message.Target != TextMessageTargetMode.Private)
+					return;
+				if (message.InvokerId == client.ClientId)
+					return;
+				if (string.IsNullOrWhiteSpace(message.Message))
+					return;
+				PrivateCommand?.Invoke(message.Message);
+			};
 		}
 
 		public async Task Connect(AppConfig config)

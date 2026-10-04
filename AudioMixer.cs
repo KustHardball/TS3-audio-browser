@@ -138,19 +138,30 @@ namespace TsBrowser
 				cache[path] = pcm;
 		}
 
-		public void Play(string path)
+		/// <summary>
+		/// Запускает нарезку, только если саундбар сейчас молчит. Иначе команда теряется, очереди нет.
+		/// </summary>
+		public bool TryPlay(string path)
 		{
-			byte[] pcm;
 			lock (gate)
-				cache.TryGetValue(path, out pcm);
-
-			if (pcm == null)
 			{
-				pcm = SoundDecoder.Decode(path);
-				lock (gate)
-					cache[path] = pcm;
+				if (voices.Count > 0)
+					return false;
 			}
 
+			var pcm = TakeCached(path);
+			lock (gate)
+			{
+				if (voices.Count > 0)
+					return false;
+				voices.Add(new Voice { Path = path, Pcm = pcm, Pos = 0 });
+				return true;
+			}
+		}
+
+		public void Play(string path)
+		{
+			byte[] pcm = TakeCached(path);
 			lock (gate)
 			{
 				for (int i = voices.Count - 1; i >= 0; i--)
@@ -161,6 +172,21 @@ namespace TsBrowser
 
 				voices.Add(new Voice { Path = path, Pcm = pcm, Pos = 0 });
 			}
+		}
+
+		byte[] TakeCached(string path)
+		{
+			byte[] pcm;
+			lock (gate)
+				cache.TryGetValue(path, out pcm);
+
+			if (pcm != null)
+				return pcm;
+
+			pcm = SoundDecoder.Decode(path);
+			lock (gate)
+				cache[path] = pcm;
+			return pcm;
 		}
 
 		void Loop()
