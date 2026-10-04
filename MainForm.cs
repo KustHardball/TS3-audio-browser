@@ -214,11 +214,13 @@ namespace TsBrowser
 			statusTimer = new Timer { Interval = 500 };
 			statusTimer.Tick += (_, __) => RefreshMeter();
 			statusTimer.Start();
-			Shown += (_, __) =>
+			Shown += async (_, __) =>
 			{
 				ApplySavedProxy();
 				ReregisterHotkeys();
 				PreloadSounds();
+				if (!string.IsNullOrWhiteSpace(config.Server))
+					await ToggleConnection();
 			};
 		}
 
