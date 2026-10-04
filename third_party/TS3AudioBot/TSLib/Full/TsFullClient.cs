@@ -230,13 +230,20 @@ namespace TSLib.Full
 
 			case PacketType.Voice:
 			case PacketType.VoiceWhisper:
-				OutStream?.Write(packet.Data, new Meta
+				try
 				{
-					In = new MetaIn
+					OutStream?.Write(packet.Data, new Meta
 					{
-						Whisper = packet.PacketType == PacketType.VoiceWhisper
-					}
-				});
+						In = new MetaIn
+						{
+							Whisper = packet.PacketType == PacketType.VoiceWhisper
+						}
+					});
+				}
+				catch (Exception ex)
+				{
+					Log.Debug(ex, "Voice packet dropped");
+				}
 				break;
 
 			case PacketType.Init1:

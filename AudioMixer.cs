@@ -138,6 +138,15 @@ namespace TsBrowser
 				cache[path] = pcm;
 		}
 
+		public bool IsBusy
+		{
+			get
+			{
+				lock (gate)
+					return voices.Count > 0;
+			}
+		}
+
 		/// <summary>
 		/// Запускает нарезку, только если саундбар сейчас молчит. Иначе команда теряется, очереди нет.
 		/// </summary>

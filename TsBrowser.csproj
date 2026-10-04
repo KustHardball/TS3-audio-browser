@@ -35,5 +35,6 @@
 
   <ItemGroup>
     <Content Include="third_party\TS3AudioBot\TS3AudioBot\lib\x64\libopus.dll" Link="libopus.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="phrase_listen.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
   </ItemGroup>
 </Project>

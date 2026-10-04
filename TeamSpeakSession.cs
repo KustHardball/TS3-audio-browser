@@ -17,7 +17,11 @@ namespace TsBrowser
 		readonly PreciseTimedPipe timePipe;
 		readonly StaticMetaPipe metaPipe;
 		readonly PcmRing ring;
+		readonly AudioPacketReader incomingReader = new AudioPacketReader();
+		readonly DecoderPipe incomingDecoder = new DecoderPipe();
 		bool disposed;
+
+		public int OwnClientId => client.ClientId.Value;
 
 		public string Uid { get; private set; } = "";
 
@@ -41,6 +45,8 @@ namespace TsBrowser
 			metaPipe.SetVoice();
 
 			ring.Into(timePipe).Chain(metaPipe).Chain(encoder).Chain(client);
+			incomingReader.OutStream = incomingDecoder;
+			client.OutStream = incomingReader;
 
 			client.OnDisconnected += (_, args) =>
 			{
@@ -61,6 +67,11 @@ namespace TsBrowser
 					return;
 				PrivateCommand?.Invoke(message.Message);
 			};
+		}
+
+		public void SetIncomingVoice(IAudioPassiveConsumer consumer)
+		{
+			incomingDecoder.OutStream = consumer;
 		}
 
 		public async Task Connect(AppConfig config)
@@ -163,6 +174,7 @@ namespace TsBrowser
 
 			timePipe.Dispose();
 			encoder.Dispose();
+			incomingDecoder.Dispose();
 			client.Dispose();
 			scheduler.Dispose();
 		}

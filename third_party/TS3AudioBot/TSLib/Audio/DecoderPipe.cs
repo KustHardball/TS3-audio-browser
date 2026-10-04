@@ -28,6 +28,7 @@ namespace TSLib.Audio
 		// - Make dispose threadsafe OR redefine thread safety requirements for pipes.
 
 		private readonly Dictionary<ClientId, (OpusDecoder, Codec)> decoders = new Dictionary<ClientId, (OpusDecoder, Codec)>();
+		private readonly object decoderGate = new object();
 		private readonly byte[] decodedBuffer;
 
 		public DecoderPipe()
@@ -40,31 +41,50 @@ namespace TSLib.Audio
 			if (OutStream is null || meta?.Codec is null)
 				return;
 
-			switch (meta.Codec.Value)
+			lock (decoderGate)
 			{
-			case Codec.OpusVoice:
+				try
 				{
-					var decoder = GetDecoder(meta.In.Sender, Codec.OpusVoice);
-					var decodedData = decoder.Decode(data, decodedBuffer.AsSpan(0, decodedBuffer.Length / 2));
-					int dataLength = decodedData.Length;
-					if (!AudioTools.TryMonoToStereo(decodedBuffer, ref dataLength))
+					switch (meta.Codec.Value)
+					{
+					case Codec.OpusVoice:
+						{
+							var decoder = GetDecoder(meta.In.Sender, Codec.OpusVoice);
+							var decodedData = decoder.Decode(data, decodedBuffer.AsSpan(0, decodedBuffer.Length / 2));
+							int dataLength = decodedData.Length;
+							if (!AudioTools.TryMonoToStereo(decodedBuffer, ref dataLength))
+								break;
+							OutStream?.Write(decodedBuffer.AsSpan(0, dataLength), meta);
+						}
 						break;
-					OutStream?.Write(decodedBuffer.AsSpan(0, dataLength), meta);
-				}
-				break;
 
-			case Codec.OpusMusic:
+					case Codec.OpusMusic:
+						{
+							var decoder = GetDecoder(meta.In.Sender, Codec.OpusMusic);
+							var decodedData = decoder.Decode(data, decodedBuffer);
+							OutStream?.Write(decodedData, meta);
+						}
+						break;
+
+					default:
+						// Cannot decode
+						break;
+					}
+				}
+				catch (Exception)
 				{
-					var decoder = GetDecoder(meta.In.Sender, Codec.OpusMusic);
-					var decodedData = decoder.Decode(data, decodedBuffer);
-					OutStream?.Write(decodedData, meta);
+					// Битый кадр Opus не должен ронять процесс. Декодер этого клиента сбрасываем.
+					DropDecoder(meta.In.Sender);
 				}
-				break;
-
-			default:
-				// Cannot decode
-				break;
 			}
+		}
+
+		private void DropDecoder(ClientId sender)
+		{
+			if (!decoders.TryGetValue(sender, out var decoder))
+				return;
+			decoders.Remove(sender);
+			decoder.Item1.Dispose();
 		}
 
 		private OpusDecoder GetDecoder(ClientId sender, Codec codec)
@@ -94,9 +114,11 @@ namespace TSLib.Audio
 
 		public void Dispose()
 		{
-			foreach (var (decoder, _) in decoders.Values)
+			lock (decoderGate)
 			{
-				decoder.Dispose();
+				foreach (var (decoder, _) in decoders.Values)
+					decoder.Dispose();
+				decoders.Clear();
 			}
 		}
 	}

@@ -23,6 +23,7 @@ namespace TsBrowser
 		readonly PcmRing outputRing = new PcmRing();
 		readonly LocalMonitor monitor = new LocalMonitor();
 		readonly AudioMixer mixer;
+		readonly PhraseListener phraseListener;
 		readonly ChromiumWebBrowser browser;
 		readonly TextBox urlBox;
 		readonly Button connectButton;
@@ -50,6 +51,10 @@ namespace TsBrowser
 			this.config = config;
 			monitor.Enabled = config.ListenLocally;
 			mixer = new AudioMixer(browserRing, outputRing, monitor, config.BrowserVolume, config.SoundVolume);
+			phraseListener = new PhraseListener(config, OnPhraseSlot, OnPhraseStatus)
+			{
+				ClipPlaying = () => mixer.IsBusy
+			};
 			Text = "Браузер в TeamSpeak";
 			Width = 1100;
 			Height = 760;
@@ -166,8 +171,10 @@ namespace TsBrowser
 			};
 			connectButton = new Button { Text = "Подключить", AutoSize = true, Margin = new Padding(8, 4, 6, 3) };
 			var settingsButton = new Button { Text = "Настройки", AutoSize = true, Margin = new Padding(0, 4, 3, 3), AccessibleName = "Настройки" };
+			var phraseButton = new Button { Text = "Фразы", AutoSize = true, Margin = new Padding(0, 4, 3, 3), AccessibleName = "Фразы" };
 			connectButton.Click += async (_, __) => await ToggleConnection();
 			settingsButton.Click += (_, __) => OpenSettings();
+			phraseButton.Click += (_, __) => OpenPhrases();
 
 			var controls = new FlowLayoutPanel
 			{
@@ -182,6 +189,7 @@ namespace TsBrowser
 			controls.Controls.Add(soundVolume);
 			controls.Controls.Add(connectButton);
 			controls.Controls.Add(settingsButton);
+			controls.Controls.Add(phraseButton);
 			top.SetColumnSpan(controls, 8);
 			top.Controls.Add(controls, 0, 3);
 
@@ -219,6 +227,7 @@ namespace TsBrowser
 				ApplySavedProxy();
 				ReregisterHotkeys();
 				PreloadSounds();
+				phraseListener.Apply(config);
 				if (!string.IsNullOrWhiteSpace(config.Server))
 					await ToggleConnection();
 			};
@@ -399,6 +408,45 @@ namespace TsBrowser
 					return;
 				BeginInvoke(new Action(() => SetStatus(message)));
 			});
+		}
+
+		void OnPhraseSlot(int slot)
+		{
+			if (IsDisposed || !IsHandleCreated)
+				return;
+			try
+			{
+				BeginInvoke(new Action(() => PlayPrivateSlot(slot)));
+			}
+			catch (InvalidOperationException)
+			{
+			}
+		}
+
+		void OnPhraseStatus(string text)
+		{
+			if (IsDisposed || !IsHandleCreated)
+				return;
+			try
+			{
+				BeginInvoke(new Action(() => SetStatus(text)));
+			}
+			catch (InvalidOperationException)
+			{
+			}
+		}
+
+		void OpenPhrases()
+		{
+			using (var dialog = new PhraseForm(config))
+			{
+				if (dialog.ShowDialog(this) != DialogResult.OK)
+					return;
+				dialog.CopyTo(config);
+			}
+
+			try { config.Save(); } catch { }
+			phraseListener.Apply(config);
 		}
 
 		void OpenSettings()
@@ -716,7 +764,9 @@ namespace TsBrowser
 						BeginInvoke(new Action(() => SetStatus(message)));
 					};
 					created.PrivateCommand += HandlePrivateCommand;
+					created.SetIncomingVoice(phraseListener.Tap);
 					await created.Connect(config);
+					phraseListener.OwnClientId = created.OwnClientId;
 					session = created;
 					connectButton.Text = "Отключить";
 					SetStatus("В канале как «" + config.Nickname + "». UID: " + created.Uid
@@ -777,6 +827,7 @@ namespace TsBrowser
 
 			ReadConfigFromForm();
 			try { config.Save(); } catch { }
+			try { phraseListener.Dispose(); } catch { }
 			try { mixer.Dispose(); } catch { }
 			try { session?.Dispose(); } catch { }
 			try { monitor.Dispose(); } catch { }

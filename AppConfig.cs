@@ -22,6 +22,12 @@ namespace TsBrowser
 		}
 	}
 
+	public sealed class PhraseTrigger
+	{
+		public string Text { get; set; } = "";
+		public int Slot { get; set; } = 1;
+	}
+
 	public sealed class SoundClip
 	{
 		public string Name { get; set; } = "";
@@ -52,6 +58,8 @@ namespace TsBrowser
 		public int SoundVolume { get; set; } = 100;
 		public List<FavoriteLink> Favorites { get; set; }
 		public List<SoundClip> Sounds { get; set; }
+		public bool PhraseListen { get; set; }
+		public List<PhraseTrigger> Phrases { get; set; }
 
 		public static string DataDirectory =>
 			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TsBrowser");
@@ -72,6 +80,8 @@ namespace TsBrowser
 							cfg.Favorites = FavoriteLink.CreateDefaults();
 						if (cfg.Sounds == null)
 							cfg.Sounds = new List<SoundClip>();
+						if (cfg.Phrases == null)
+							cfg.Phrases = new List<PhraseTrigger>();
 						if (cfg.ProxyPort < 1 || cfg.ProxyPort > 65535)
 							cfg.ProxyPort = 1080;
 						if (cfg.BrowserVolume < 0 || cfg.BrowserVolume > 100)
@@ -90,6 +100,7 @@ namespace TsBrowser
 			var created = new AppConfig();
 			created.Favorites = FavoriteLink.CreateDefaults();
 			created.Sounds = new List<SoundClip>();
+			created.Phrases = new List<PhraseTrigger>();
 			return created;
 		}
 
