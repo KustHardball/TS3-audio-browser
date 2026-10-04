@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using CefSharp.WinForms;
 
@@ -9,35 +12,44 @@ namespace TsBrowser
 {
 	public sealed class MainForm : Form
 	{
+		const int WmHotkey = 0x0312;
+		const uint ModAlt = 0x0001;
+		const uint ModControl = 0x0002;
+		const uint ModShift = 0x0004;
+		const uint ModNoRepeat = 0x4000;
+
 		readonly AppConfig config;
-		readonly PcmRing ring = new PcmRing();
+		readonly PcmRing browserRing = new PcmRing();
+		readonly PcmRing outputRing = new PcmRing();
 		readonly LocalMonitor monitor = new LocalMonitor();
+		readonly AudioMixer mixer;
 		readonly ChromiumWebBrowser browser;
 		readonly TextBox urlBox;
-		readonly TextBox serverBox;
-		readonly TextBox serverPasswordBox;
-		readonly TextBox channelBox;
-		readonly TextBox channelPasswordBox;
-		readonly TextBox nickBox;
-		readonly NumericUpDown levelBox;
-		readonly CheckBox listenBox;
 		readonly Button connectButton;
+		readonly TrackBar browserVolume;
+		readonly TrackBar soundVolume;
 		readonly Label statusLabel;
 		readonly Timer statusTimer;
 		readonly FlowLayoutPanel favoritesBar;
-		readonly CheckBox proxyBox;
-		readonly TextBox proxyHostBox;
-		readonly NumericUpDown proxyPortBox;
-		readonly CheckBox proxyBypassBox;
+		readonly FlowLayoutPanel soundBar;
 		readonly ToolTip tips = new ToolTip();
 		readonly HttpClient icons = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+		readonly List<int> hotkeyIds = new List<int>();
 		string pageTitle = "";
 		TeamSpeakSession session;
 		bool connecting;
 
+		[DllImport("user32.dll")]
+		static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+		[DllImport("user32.dll")]
+		static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
 		public MainForm(AppConfig config)
 		{
 			this.config = config;
+			monitor.Enabled = config.ListenLocally;
+			mixer = new AudioMixer(browserRing, outputRing, monitor, config.BrowserVolume, config.SoundVolume);
 			Text = "Браузер в TeamSpeak";
 			Width = 1100;
 			Height = 760;
@@ -94,78 +106,84 @@ namespace TsBrowser
 			top.Controls.Add(favoritesBar, 0, 1);
 			RebuildFavorites();
 
-			serverBox = new TextBox { Dock = DockStyle.Fill, Text = config.Server };
-			serverPasswordBox = new TextBox { Dock = DockStyle.Fill, Text = config.ServerPassword, UseSystemPasswordChar = true };
-			channelBox = new TextBox { Dock = DockStyle.Fill, Text = config.Channel };
-			channelPasswordBox = new TextBox { Dock = DockStyle.Fill, Text = config.ChannelPassword, UseSystemPasswordChar = true };
-
-			top.Controls.Add(new Label { Text = "Сервер", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 2);
-			top.Controls.Add(serverBox, 1, 2);
-			top.Controls.Add(new Label { Text = "Пароль", AutoSize = true, Anchor = AnchorStyles.Left }, 2, 2);
-			top.Controls.Add(serverPasswordBox, 3, 2);
-			top.Controls.Add(new Label { Text = "Канал", AutoSize = true, Anchor = AnchorStyles.Left }, 4, 2);
-			top.Controls.Add(channelBox, 5, 2);
-			top.Controls.Add(new Label { Text = "Пароль канала", AutoSize = true, Anchor = AnchorStyles.Left }, 6, 2);
-			top.Controls.Add(channelPasswordBox, 7, 2);
-
-			nickBox = new TextBox { Dock = DockStyle.Fill, Text = config.Nickname };
-			levelBox = new NumericUpDown { Minimum = 1, Maximum = 12, Value = Math.Min(12, Math.Max(1, config.SecurityLevel)), Width = 56 };
-			connectButton = new Button { Text = "Подключить", AutoSize = true };
-			listenBox = new CheckBox { Text = "Слышать у себя", AutoSize = true, Checked = config.ListenLocally, Anchor = AnchorStyles.Left };
-			connectButton.Click += async (_, __) => await ToggleConnection();
-			listenBox.CheckedChanged += (_, __) =>
+			soundBar = new FlowLayoutPanel
 			{
-				monitor.Enabled = listenBox.Checked;
-				config.ListenLocally = listenBox.Checked;
-			};
-			monitor.Enabled = config.ListenLocally;
-
-			top.Controls.Add(new Label { Text = "Ник", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 3);
-			top.Controls.Add(nickBox, 1, 3);
-			top.Controls.Add(new Label { Text = "Уровень личности", AutoSize = true, Anchor = AnchorStyles.Left }, 2, 3);
-			top.Controls.Add(levelBox, 3, 3);
-			top.Controls.Add(connectButton, 4, 3);
-			top.SetColumnSpan(listenBox, 3);
-			top.Controls.Add(listenBox, 5, 3);
-
-			proxyBox = new CheckBox { Text = "SOCKS5", AutoSize = true, Checked = config.ProxyEnabled, Margin = new Padding(0, 8, 6, 3) };
-			proxyHostBox = new TextBox { Text = config.ProxyHost, Width = 180, Margin = new Padding(0, 6, 6, 3) };
-			proxyPortBox = new NumericUpDown
-			{
-				Minimum = 1,
-				Maximum = 65535,
-				Value = Math.Min(65535, Math.Max(1, config.ProxyPort)),
-				Width = 72,
-				Margin = new Padding(0, 6, 8, 3)
-			};
-			proxyBypassBox = new CheckBox
-			{
-				Text = "Локальные адреса напрямую",
+				Dock = DockStyle.Fill,
 				AutoSize = true,
-				Checked = config.ProxyBypassLocal,
-				Margin = new Padding(0, 8, 3, 3)
+				AutoSizeMode = AutoSizeMode.GrowAndShrink,
+				WrapContents = true,
+				MinimumSize = new Size(200, 52),
+				Margin = new Padding(0, 4, 0, 0)
 			};
-			tips.SetToolTip(proxyHostBox, "Адрес SOCKS5, как в Firefox. Только для страниц браузера.");
-			tips.SetToolTip(proxyBypassBox, "localhost, 127.0.0.1 и адреса локальной сети открываются напрямую. TeamSpeak этот прокси не использует.");
-			proxyBox.CheckedChanged += (_, __) => ApplyProxyFromForm();
-			proxyBypassBox.CheckedChanged += (_, __) => { if (proxyBox.Checked) ApplyProxyFromForm(); };
-			proxyHostBox.Leave += (_, __) => { if (proxyBox.Checked) ApplyProxyFromForm(); };
-			proxyPortBox.ValueChanged += (_, __) => { if (proxyBox.Checked) ApplyProxyFromForm(); };
+			var addSound = new Button
+			{
+				Text = "Добавить звук",
+				AutoSize = true,
+				Height = 48,
+				Margin = new Padding(0, 2, 6, 2),
+				AccessibleName = "Добавить звук"
+			};
+			tips.SetToolTip(addSound, "mp3, wav, ogg, flac, m4a, aac, wma. Кнопка играет сразу. Правый клик задаёт клавишу, она срабатывает и из игры.");
+			addSound.Click += (_, __) => AddSounds();
+			soundBar.Controls.Add(addSound);
+			top.SetColumnSpan(soundBar, 8);
+			top.Controls.Add(soundBar, 0, 2);
+			RebuildSounds();
 
-			var proxyRow = new FlowLayoutPanel
+			browserVolume = new TrackBar
+			{
+				Minimum = 0,
+				Maximum = 100,
+				Value = config.BrowserVolume,
+				TickFrequency = 25,
+				Width = 130,
+				Height = 32,
+				AutoSize = false,
+				Margin = new Padding(0, 0, 12, 0),
+				AccessibleName = "Громкость браузера"
+			};
+			soundVolume = new TrackBar
+			{
+				Minimum = 0,
+				Maximum = 100,
+				Value = config.SoundVolume,
+				TickFrequency = 25,
+				Width = 130,
+				Height = 32,
+				AutoSize = false,
+				Margin = new Padding(0, 0, 12, 0),
+				AccessibleName = "Громкость саундбара"
+			};
+			browserVolume.ValueChanged += (_, __) =>
+			{
+				config.BrowserVolume = browserVolume.Value;
+				mixer.SetVolumes(config.BrowserVolume, config.SoundVolume);
+			};
+			soundVolume.ValueChanged += (_, __) =>
+			{
+				config.SoundVolume = soundVolume.Value;
+				mixer.SetVolumes(config.BrowserVolume, config.SoundVolume);
+			};
+			connectButton = new Button { Text = "Подключить", AutoSize = true, Margin = new Padding(8, 4, 6, 3) };
+			var settingsButton = new Button { Text = "Настройки", AutoSize = true, Margin = new Padding(0, 4, 3, 3), AccessibleName = "Настройки" };
+			connectButton.Click += async (_, __) => await ToggleConnection();
+			settingsButton.Click += (_, __) => OpenSettings();
+
+			var controls = new FlowLayoutPanel
 			{
 				Dock = DockStyle.Fill,
 				AutoSize = true,
 				WrapContents = false,
-				Margin = new Padding(0)
+				Margin = new Padding(0, 4, 0, 0)
 			};
-			proxyRow.Controls.Add(proxyBox);
-			proxyRow.Controls.Add(proxyHostBox);
-			proxyRow.Controls.Add(new Label { Text = "порт", AutoSize = true, Margin = new Padding(0, 8, 4, 3) });
-			proxyRow.Controls.Add(proxyPortBox);
-			proxyRow.Controls.Add(proxyBypassBox);
-			top.SetColumnSpan(proxyRow, 8);
-			top.Controls.Add(proxyRow, 0, 4);
+			controls.Controls.Add(new Label { Text = "Браузер", AutoSize = true, Margin = new Padding(0, 8, 4, 0) });
+			controls.Controls.Add(browserVolume);
+			controls.Controls.Add(new Label { Text = "Саундбар", AutoSize = true, Margin = new Padding(0, 8, 4, 0) });
+			controls.Controls.Add(soundVolume);
+			controls.Controls.Add(connectButton);
+			controls.Controls.Add(settingsButton);
+			top.SetColumnSpan(controls, 8);
+			top.Controls.Add(controls, 0, 3);
 
 			statusLabel = new Label
 			{
@@ -175,7 +193,7 @@ namespace TsBrowser
 				Text = "Страница ещё молчит. Откройте ролик или радио, затем подключитесь к серверу. Канал должен быть с кодеком Opus Music."
 			};
 
-			var capture = new BrowserAudioCapture(ring, monitor);
+			var capture = new BrowserAudioCapture(browserRing);
 			browser = new ChromiumWebBrowser(string.IsNullOrWhiteSpace(config.StartUrl) ? "about:blank" : config.StartUrl)
 			{
 				Dock = DockStyle.Fill,
@@ -196,7 +214,12 @@ namespace TsBrowser
 			statusTimer = new Timer { Interval = 500 };
 			statusTimer.Tick += (_, __) => RefreshMeter();
 			statusTimer.Start();
-			Shown += (_, __) => ApplyProxyFromForm();
+			Shown += (_, __) =>
+			{
+				ApplySavedProxy();
+				ReregisterHotkeys();
+				PreloadSounds();
+			};
 		}
 
 		void RebuildFavorites()
@@ -366,24 +389,239 @@ namespace TsBrowser
 			return Color.FromArgb(40 + Math.Abs(hash % 160), 70 + Math.Abs(hash / 3 % 120), 140);
 		}
 
-		void ApplyProxyFromForm()
+		void ApplySavedProxy()
 		{
-			config.ProxyEnabled = proxyBox.Checked;
-			config.ProxyHost = proxyHostBox.Text.Trim();
-			config.ProxyPort = (int)proxyPortBox.Value;
-			config.ProxyBypassLocal = proxyBypassBox.Checked;
-			if (config.ProxyEnabled && config.ProxyHost.Length == 0)
-			{
-				SetStatus("Укажите адрес SOCKS5. Пока прокси не включён, локальный трафик и так идёт напрямую.");
-				return;
-			}
-
 			BrowserProxy.Apply(config, message =>
 			{
 				if (IsDisposed)
 					return;
 				BeginInvoke(new Action(() => SetStatus(message)));
 			});
+		}
+
+		void OpenSettings()
+		{
+			using (var dialog = new SettingsForm(config))
+			{
+				if (dialog.ShowDialog(this) != DialogResult.OK)
+					return;
+				dialog.CopyTo(config);
+			}
+
+			monitor.Enabled = config.ListenLocally;
+			try { config.Save(); } catch { }
+			ApplySavedProxy();
+			if (session != null)
+				SetStatus("Сервер, канал и ник применятся после переподключения.");
+		}
+
+		async void AddSounds()
+		{
+			using (var dialog = new OpenFileDialog
+			{
+				Title = "Нарезки для саундбара",
+				Filter = "Аудио|*.mp3;*.wav;*.ogg;*.flac;*.m4a;*.aac;*.wma|Все файлы|*.*",
+				Multiselect = true
+			})
+			{
+				if (dialog.ShowDialog(this) != DialogResult.OK)
+					return;
+
+				if (config.Sounds.Count + dialog.FileNames.Length > 32)
+				{
+					SetStatus("В саундбаре не больше 32 нарезок.");
+					return;
+				}
+
+				foreach (var path in dialog.FileNames)
+				{
+					SetStatus("Загружаю " + Path.GetFileName(path) + "…");
+					try
+					{
+						var pcm = await System.Threading.Tasks.Task.Run(() => SoundDecoder.Decode(path));
+						mixer.Cache(path, pcm);
+						config.Sounds.Add(new SoundClip
+						{
+							Name = Path.GetFileNameWithoutExtension(path),
+							Path = path
+						});
+					}
+					catch (Exception ex)
+					{
+						SetStatus(ex.Message);
+					}
+				}
+			}
+
+			RebuildSounds();
+			ReregisterHotkeys();
+			try { config.Save(); } catch { }
+		}
+
+		void RebuildSounds()
+		{
+			for (int i = soundBar.Controls.Count - 1; i >= 1; i--)
+			{
+				var old = soundBar.Controls[i];
+				soundBar.Controls.RemoveAt(i);
+				old.Dispose();
+			}
+
+			foreach (var clip in config.Sounds)
+			{
+				var item = clip;
+				var button = new Button
+				{
+					Size = new Size(148, 48),
+					Margin = new Padding(0, 2, 6, 2),
+					Text = ClipCaption(item),
+					TextAlign = ContentAlignment.MiddleCenter,
+					AccessibleName = item.Name
+				};
+				tips.SetToolTip(button, item.Path + "\n" + SoundHotkey.Format(item) + "\nСрабатывает и когда игра на переднем плане.");
+				button.Click += (_, __) => PlayClip(item);
+				var menu = new ContextMenuStrip();
+				menu.Items.Add("Клавиша…", null, (_, __) => AssignHotkey(item));
+				menu.Items.Add("Удалить", null, (_, __) => RemoveSound(item));
+				button.ContextMenuStrip = menu;
+				soundBar.Controls.Add(button);
+			}
+		}
+
+		static string ClipCaption(SoundClip clip)
+		{
+			var name = clip.Name ?? "";
+			if (name.Length > 22)
+				name = name.Substring(0, 21) + "…";
+			return name + "\n" + SoundHotkey.Format(clip);
+		}
+
+		void PlayClip(SoundClip clip)
+		{
+			try
+			{
+				mixer.Play(clip.Path);
+			}
+			catch (Exception ex)
+			{
+				SetStatus(ex.Message);
+			}
+		}
+
+		void AssignHotkey(SoundClip clip)
+		{
+			using (var dialog = new HotkeyDialog(clip))
+			{
+				if (dialog.ShowDialog(this) != DialogResult.OK)
+					return;
+
+				if (dialog.Cleared)
+				{
+					clip.KeyCode = 0;
+					clip.Ctrl = clip.Alt = clip.Shift = false;
+				}
+				else
+				{
+					var key = (Keys)dialog.KeyCode;
+					bool functionKey = key >= Keys.F1 && key <= Keys.F24;
+					if (!dialog.Ctrl && !dialog.Alt && !dialog.Shift && !functionKey)
+					{
+						SetStatus("Добавьте Ctrl, Alt или Shift. Клавиша без модификатора перестанет печататься везде, пока программа запущена.");
+						return;
+					}
+
+					var trial = new SoundClip
+					{
+						KeyCode = dialog.KeyCode,
+						Ctrl = dialog.Ctrl,
+						Alt = dialog.Alt,
+						Shift = dialog.Shift
+					};
+					foreach (var other in config.Sounds)
+					{
+						if (!ReferenceEquals(other, clip) && SoundHotkey.Same(other, trial))
+						{
+							SetStatus("Это сочетание уже стоит на «" + other.Name + "».");
+							return;
+						}
+					}
+
+					clip.KeyCode = dialog.KeyCode;
+					clip.Ctrl = dialog.Ctrl;
+					clip.Alt = dialog.Alt;
+					clip.Shift = dialog.Shift;
+				}
+			}
+
+			RebuildSounds();
+			ReregisterHotkeys();
+			try { config.Save(); } catch { }
+		}
+
+		void RemoveSound(SoundClip clip)
+		{
+			config.Sounds.Remove(clip);
+			RebuildSounds();
+			ReregisterHotkeys();
+			try { config.Save(); } catch { }
+		}
+
+		async void PreloadSounds()
+		{
+			foreach (var clip in config.Sounds.ToArray())
+			{
+				if (IsDisposed)
+					return;
+				try
+				{
+					var pcm = await System.Threading.Tasks.Task.Run(() => SoundDecoder.Decode(clip.Path));
+					if (!IsDisposed)
+						mixer.Cache(clip.Path, pcm);
+				}
+				catch
+				{
+					// Кнопка останется. Ошибка покажется в момент запуска.
+				}
+			}
+		}
+
+		void ReregisterHotkeys()
+		{
+			if (!IsHandleCreated)
+				return;
+
+			foreach (var id in hotkeyIds)
+				UnregisterHotKey(Handle, id);
+			hotkeyIds.Clear();
+
+			for (int i = 0; i < config.Sounds.Count; i++)
+			{
+				var clip = config.Sounds[i];
+				if (clip.KeyCode == 0)
+					continue;
+
+				uint mods = ModNoRepeat;
+				if (clip.Ctrl) mods |= ModControl;
+				if (clip.Alt) mods |= ModAlt;
+				if (clip.Shift) mods |= ModShift;
+				int id = 200 + i;
+				if (RegisterHotKey(Handle, id, mods, (uint)clip.KeyCode))
+					hotkeyIds.Add(id);
+				else
+					SetStatus("Клавиша занята другим приложением: " + SoundHotkey.Format(clip));
+			}
+		}
+
+		protected override void WndProc(ref Message m)
+		{
+			if (m.Msg == WmHotkey)
+			{
+				int index = m.WParam.ToInt32() - 200;
+				if (index >= 0 && index < config.Sounds.Count)
+					PlayClip(config.Sounds[index]);
+			}
+
+			base.WndProc(ref m);
 		}
 
 		void Navigate()
@@ -420,7 +658,7 @@ namespace TsBrowser
 				config.Save();
 				SetStatus("Подключаюсь. Если уровень личности ещё не набран, это может занять несколько секунд…");
 
-				var created = new TeamSpeakSession(ring);
+				var created = new TeamSpeakSession(outputRing);
 				try
 				{
 					created.Status += message =>
@@ -433,7 +671,7 @@ namespace TsBrowser
 					session = created;
 					connectButton.Text = "Отключить";
 					SetStatus("В канале как «" + config.Nickname + "». UID: " + created.Uid
-						+ ". Слушайте этого клиента из обычного TeamSpeak. Если звук двоится, снимите «Слышать у себя» и приглушите бота у себя в клиенте.");
+						+ ". Слушайте этого клиента из обычного TeamSpeak. Если звук двоится, выключите «Слышать у себя» в настройках и приглушите этого клиента у себя.");
 				}
 				catch
 				{
@@ -455,18 +693,9 @@ namespace TsBrowser
 
 		void ReadConfigFromForm()
 		{
-			config.Server = serverBox.Text.Trim();
-			config.ServerPassword = serverPasswordBox.Text;
-			config.Channel = channelBox.Text.Trim();
-			config.ChannelPassword = channelPasswordBox.Text;
-			config.Nickname = nickBox.Text.Trim();
-			config.SecurityLevel = (int)levelBox.Value;
 			config.StartUrl = urlBox.Text.Trim();
-			config.ListenLocally = listenBox.Checked;
-			config.ProxyEnabled = proxyBox.Checked;
-			config.ProxyHost = proxyHostBox.Text.Trim();
-			config.ProxyPort = (int)proxyPortBox.Value;
-			config.ProxyBypassLocal = proxyBypassBox.Checked;
+			config.BrowserVolume = browserVolume.Value;
+			config.SoundVolume = soundVolume.Value;
 		}
 
 		void RefreshMeter()
@@ -475,7 +704,7 @@ namespace TsBrowser
 				return;
 
 			var link = session == null ? "не в сети" : "в сети, UID " + session.Uid;
-			statusLabel.Text = link + " · пакетов звука: " + ring.CapturedPackets + " · буфер " + ring.BufferedMilliseconds + " мс";
+			statusLabel.Text = link + " · пакетов звука: " + browserRing.CapturedPackets + " · буфер " + outputRing.BufferedMilliseconds + " мс";
 		}
 
 		DateTime lastStatus = DateTime.MinValue;
@@ -490,8 +719,16 @@ namespace TsBrowser
 		protected override void OnFormClosing(FormClosingEventArgs e)
 		{
 			statusTimer.Stop();
+			if (IsHandleCreated)
+			{
+				foreach (var id in hotkeyIds)
+					UnregisterHotKey(Handle, id);
+				hotkeyIds.Clear();
+			}
+
 			ReadConfigFromForm();
 			try { config.Save(); } catch { }
+			try { mixer.Dispose(); } catch { }
 			try { session?.Dispose(); } catch { }
 			try { monitor.Dispose(); } catch { }
 			try { icons.Dispose(); } catch { }

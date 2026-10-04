@@ -62,6 +62,23 @@ namespace TsBrowser
 			}
 		}
 
+		public int ReadUpTo(byte[] target, int offset, int length)
+		{
+			lock (gate)
+			{
+				int n = Math.Min(count, length);
+				n -= n % 4;
+				for (int i = 0; i < n; i++)
+				{
+					target[offset + i] = buffer[readPos];
+					readPos = (readPos + 1) % buffer.Length;
+					count--;
+				}
+
+				return n;
+			}
+		}
+
 		public int Read(byte[] target, int offset, int length, out Meta meta)
 		{
 			meta = null;
@@ -92,14 +109,12 @@ namespace TsBrowser
 	public sealed class BrowserAudioCapture : AudioHandler
 	{
 		readonly PcmRing ring;
-		readonly LocalMonitor monitor;
 		int sampleRate = 48000;
 		int channels = 2;
 
-		public BrowserAudioCapture(PcmRing ring, LocalMonitor monitor)
+		public BrowserAudioCapture(PcmRing ring)
 		{
 			this.ring = ring;
-			this.monitor = monitor;
 		}
 
 		protected override bool GetAudioParameters(IWebBrowser chromiumWebBrowser, IBrowser browser, ref AudioParameters parameters)
@@ -126,7 +141,6 @@ namespace TsBrowser
 				if (pcm == null || pcm.Length == 0)
 					return;
 
-				monitor.Write(pcm);
 				ring.Write(pcm, pcm.Length);
 			}
 			catch
@@ -192,13 +206,20 @@ namespace TsBrowser
 
 		public void Write(byte[] pcm)
 		{
-			if (!enabled || pcm == null || pcm.Length == 0)
+			if (pcm == null)
+				return;
+			Write(pcm, pcm.Length);
+		}
+
+		public void Write(byte[] pcm, int length)
+		{
+			if (!enabled || pcm == null || length <= 0)
 				return;
 
 			lock (gate)
 			{
 				EnsureStarted();
-				provider.AddSamples(pcm, 0, pcm.Length);
+				provider.AddSamples(pcm, 0, length);
 			}
 		}
 

@@ -22,6 +22,16 @@ namespace TsBrowser
 		}
 	}
 
+	public sealed class SoundClip
+	{
+		public string Name { get; set; } = "";
+		public string Path { get; set; } = "";
+		public bool Ctrl { get; set; }
+		public bool Alt { get; set; }
+		public bool Shift { get; set; }
+		public int KeyCode { get; set; }
+	}
+
 	public sealed class AppConfig
 	{
 		public string Server { get; set; } = "";
@@ -38,7 +48,10 @@ namespace TsBrowser
 		public string ProxyHost { get; set; } = "";
 		public int ProxyPort { get; set; } = 1080;
 		public bool ProxyBypassLocal { get; set; } = true;
+		public int BrowserVolume { get; set; } = 100;
+		public int SoundVolume { get; set; } = 100;
 		public List<FavoriteLink> Favorites { get; set; }
+		public List<SoundClip> Sounds { get; set; }
 
 		public static string DataDirectory =>
 			Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TsBrowser");
@@ -57,8 +70,14 @@ namespace TsBrowser
 					{
 						if (cfg.Favorites == null)
 							cfg.Favorites = FavoriteLink.CreateDefaults();
+						if (cfg.Sounds == null)
+							cfg.Sounds = new List<SoundClip>();
 						if (cfg.ProxyPort < 1 || cfg.ProxyPort > 65535)
 							cfg.ProxyPort = 1080;
+						if (cfg.BrowserVolume < 0 || cfg.BrowserVolume > 100)
+							cfg.BrowserVolume = 100;
+						if (cfg.SoundVolume < 0 || cfg.SoundVolume > 100)
+							cfg.SoundVolume = 100;
 						return cfg;
 					}
 				}
@@ -70,6 +89,7 @@ namespace TsBrowser
 
 			var created = new AppConfig();
 			created.Favorites = FavoriteLink.CreateDefaults();
+			created.Sounds = new List<SoundClip>();
 			return created;
 		}
 
